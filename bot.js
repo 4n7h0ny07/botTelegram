@@ -90,15 +90,29 @@ bot.hears('Vender Usdt', async (ctx) => {
 });
 
 bot.hears('Media de compra', async (ctx) => {
-  const data = await fetchUsdtMedia('buy');
-  if (data.success) ctx.reply(`La media de compra es: BOB ${data.media}`);
-  else ctx.reply(`No se pudo conectar al servidor.`);
+    try {
+        const data = await fetchUsdtMedia('buy'); // espera la respuesta
+        if (data.success) {
+            ctx.reply(`Estimado ${ctx.from.first_name}, el precio de compra es: BOB ${data.media}`);
+        } else {
+            ctx.reply('No se pudo obtener la media de compra.');
+        }
+    } catch (error) {
+        ctx.reply('Error al conectarse con el servidor.');
+    }
 });
 
 bot.hears('Media de venta', async (ctx) => {
-  const data = await fetchUsdtMedia('sell');
-  if (data.success) ctx.reply(`La media de venta es: BOB ${data.media}`);
-  else ctx.reply(`No se pudo conectar al servidor.`);
+    try {
+        const data = await fetchUsdtMedia('sell'); // espera la respuesta
+        if (data.success) {
+            ctx.reply(`Estimado ${ctx.from.first_name}, el precio de venta es: BOB ${data.media}`);
+        } else {
+            ctx.reply('No se pudo obtener la media de compra.');
+        }
+    } catch (error) {
+        ctx.reply('Error al conectarse con el servidor.');
+    }
 });
 
 bot.hears('Brecha', (ctx) => ctx.reply('Brecha de compra y venta USDT'));
