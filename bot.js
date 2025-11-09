@@ -90,13 +90,13 @@ bot.hears('Vender Usdt', async (ctx) => {
 });
 
 bot.hears('Media de compra', async (ctx) => {
-  const data = await fetchUsdtMedia('BUY');
+  const data = await fetchUsdtMedia('buy');
   if (data.success) ctx.reply(`La media de compra es: BOB ${data.media}`);
   else ctx.reply(`No se pudo conectar al servidor.`);
 });
 
 bot.hears('Media de venta', async (ctx) => {
-  const data = await fetchUsdtMedia('SELL');
+  const data = await fetchUsdtMedia('sell');
   if (data.success) ctx.reply(`La media de venta es: BOB ${data.media}`);
   else ctx.reply(`No se pudo conectar al servidor.`);
 });
