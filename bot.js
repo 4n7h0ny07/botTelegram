@@ -26,15 +26,18 @@ bot.catch((err, ctx) => {
 });
 
 // === MENÚ PRINCIPAL ===
-bot.command('start', (ctx) => {
-  const msg = `Bienvenido, ${ctx.from.first_name}! Soy tu asistente USDT.`;
+// === START o SALUDO ===
+bot.hears(/^(hola|hi|hello|hey|buenas|inicio|start|comenzar|empezar|usdt)$/i, (ctx) => {
+  const nombre = ctx.from.first_name || "usuario";
+  const msg = `¡Hola ${nombre}! Bienvenido a tu asistente USDT.\n\nPuedo ayudarte a consultar precios, calcular brechas o crear notificaciones automáticas.`;
+
   bot.telegram.sendMessage(ctx.chat.id, msg, {
     reply_markup: {
       inline_keyboard: [
         [{ text: "Actividad USDT hoy", callback_data: 'usdts' }],
         [{ text: "Crear Notificaciones", callback_data: 'notifications' }],
         [{ text: "Visita nuestra web", url: "https://qrfassid.website" }],
-        [{ text: "ℹCréditos", callback_data: 'credits' }]
+        [{ text: "Créditos", callback_data: 'credits' }]
       ]
     }
   });
@@ -150,13 +153,31 @@ bot.hears('Brecha', async (ctx) => {
 
 // === NOTIFICACIONES ===
 bot.hears("Precio de compra", async (ctx) => {
-  await setNotification(ctx.from.id, "notify_buy", 1);
-  ctx.reply("Notificación de *precio de compra* activada.", { parse_mode: 'Markdown' });
+  ctx.reply('Ingresa el precio de compra objetivo (ej: 10.65 BOB):');
+
+  // Escucha la próxima respuesta del usuario
+  bot.once('text', async (ctx2) => {
+    const objetivo = parseFloat(ctx2.message.text);
+    if (isNaN(objetivo)) return ctx2.reply('⚠️ Por favor ingresa un número válido.');
+
+    // Guarda el precio objetivo en la DB
+    await setNotification(ctx2.from.id, "notify_buy", objetivo);
+
+    ctx2.reply(`Notificación de *precio de compra* activada. Te avisaré cuando llegue a BOB ${objetivo}`, { parse_mode: 'Markdown' });
+  });
 });
 
 bot.hears("Precio de venta", async (ctx) => {
-  await setNotification(ctx.from.id, "notify_sell", 1);
-  ctx.reply("Notificación de *precio de venta* activada.", { parse_mode: 'Markdown' });
+  ctx.reply('Ingresa el precio de venta objetivo (ej: 10.20 BOB):');
+
+  bot.once('text', async (ctx2) => {
+    const objetivo = parseFloat(ctx2.message.text);
+    if (isNaN(objetivo)) return ctx2.reply('⚠️ Por favor ingresa un número válido.');
+
+    await setNotification(ctx2.from.id, "notify_sell", objetivo);
+
+    ctx2.reply(`Notificación de *precio de venta* activada. Te avisaré cuando baje a BOB ${objetivo}`, { parse_mode: 'Markdown' });
+  });
 });
 
 bot.hears("Bre. compra y venta", async (ctx) => {
@@ -197,7 +218,26 @@ setInterval(async () => {
   } catch (err) {
     console.error("Error en notificador automático:", err.message);
   }
-}, 120000); // cada 2 minutos
+}, 5000); // cada 5 segundos
+
+async function checkNotificaciones() {
+  const precios = await fetchUsdtMediaAll(); // { buy: 10.52, sell: 10.47 }
+  const notificaciones = await obtenerNotificacionesActivas(); // [{ user_id, tipo, objetivo }]
+
+  notificaciones.forEach(async (n) => {
+    if (n.tipo === 'buy' && precios.buy >= n.objetivo) {
+      await bot.telegram.sendMessage(n.user_id, `📈 ¡Precio de compra alcanzado! BOB ${precios.buy} ≥ ${n.objetivo}`);
+      await desactivarNotificacion(n.user_id, 'buy'); // opcional: desactiva después de avisar
+    }
+    if (n.tipo === 'sell' && precios.sell <= n.objetivo) {
+      await bot.telegram.sendMessage(n.user_id, `📉 ¡Precio de venta alcanzado! BOB ${precios.sell} ≤ ${n.objetivo}`);
+      await desactivarNotificacion(n.user_id, 'sell'); // opcional
+    }
+  });
+}
+
+// Ejecutar cada 60 segundos
+setInterval(checkNotificaciones, 60000);
 
 // === INICIO DEL BOT ===
 async function launchBot() {
