@@ -9,7 +9,8 @@ const {
   obtenerUltimaBrecha,
   setNotification,
   clearNotifications,
-  obtenerUsuariosCon
+  obtenerUsuariosCon,
+  obtenerNotificacionesActivas
 } = require('./db');
 
 // Verificación de variables

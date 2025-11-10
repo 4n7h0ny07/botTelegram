@@ -166,6 +166,29 @@ function obtenerUsuariosCon(field) {
   });
 }
 
+function obtenerNotificacionesActivas() {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT user_id, notify_buy AS tipo_buy, notify_sell AS tipo_sell, notify_brecha, notify_media_brecha 
+       FROM notificaciones 
+       WHERE notify_buy > 0 OR notify_sell > 0 OR notify_brecha > 0 OR notify_media_brecha > 0`,
+      [],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(
+          rows.map(r => ({
+            user_id: r.user_id,
+            buy: r.tipo_buy,
+            sell: r.tipo_sell,
+            brecha: r.notify_brecha,
+            media_brecha: r.notify_media_brecha
+          }))
+        );
+      }
+    );
+  });
+}
+
 module.exports = {
   db,
   guardarMedia,
@@ -175,5 +198,6 @@ module.exports = {
   setNotification,
   clearNotifications,
   obtenerUsuariosCon,
-  obtenerUsuariosConObjetivo
+  obtenerUsuariosConObjetivo,
+  obtenerNotificacionesActivas
 };
