@@ -159,7 +159,7 @@ bot.hears("Precio de compra", async (ctx) => {
   // Escucha la próxima respuesta del usuario
   bot.once('text', async (ctx2) => {
     const objetivo = parseFloat(ctx2.message.text);
-    if (isNaN(objetivo)) return ctx2.reply('⚠️ Por favor ingresa un número válido.');
+    if (isNaN(objetivo)) return ctx2.reply('Por favor ingresa un número válido.');
 
     // Guarda el precio objetivo en la DB
     await setNotification(ctx2.from.id, "notify_buy", objetivo);
@@ -173,7 +173,7 @@ bot.hears("Precio de venta", async (ctx) => {
 
   bot.once('text', async (ctx2) => {
     const objetivo = parseFloat(ctx2.message.text);
-    if (isNaN(objetivo)) return ctx2.reply('⚠️ Por favor ingresa un número válido.');
+    if (isNaN(objetivo)) return ctx2.reply('Por favor ingresa un número válido.');
 
     await setNotification(ctx2.from.id, "notify_sell", objetivo);
 
@@ -199,6 +199,9 @@ bot.hears("Cancelar notificaciones", async (ctx) => {
 bot.hears('Salir', (ctx) => ctx.reply('¡Hasta luego!', { reply_markup: { remove_keyboard: true } }));
 
 // === NOTIFICADOR AUTOMÁTICO ===
+// === NOTIFICADOR AUTOMÁTICO ===
+let ultimaNotificacion = { porcentaje: null, diferencia: null };
+
 setInterval(async () => {
   try {
     const { buy, sell } = await fetchUsdtMediaAll();
@@ -206,20 +209,30 @@ setInterval(async () => {
 
     await guardarBrecha(buy, sell, diferencia, porcentaje);
 
-    if (porcentaje >= 0.8) {
-      const usuarios = await obtenerUsuariosCon('notify_media_brecha');
+    // ✅ Enviar alerta solo si supera el umbral y cambió el valor
+    if (
+      porcentaje >= 0.8 &&
+      (ultimaNotificacion.porcentaje === null ||
+        porcentaje.toFixed(2) !== ultimaNotificacion.porcentaje.toFixed(2))
+    ) {
+      const usuarios = await obtenerUsuariosCon("notify_media_brecha");
+
       for (const u of usuarios) {
-        bot.telegram.sendMessage(
+        await bot.telegram.sendMessage(
           u,
-          `*Alerta!* La brecha subió a ${porcentaje.toFixed(2)}% (${diferencia.toFixed(2)} Bs)\nCompra: ${buy} | Venta: ${sell}`,
-          { parse_mode: 'Markdown' }
+          `*Hola ${ctx.from.first_name}!* La brecha subió a ${porcentaje.toFixed(2)}% (${diferencia.toFixed(2)} Bs)\nCompra: ${buy} | Venta: ${sell}`,
+          { parse_mode: "Markdown" }
         );
       }
+
+      // ✅ Guardamos el último valor notificado
+      ultimaNotificacion = { porcentaje, diferencia };
+      console.log(`Notificación enviada: ${porcentaje.toFixed(2)}%`);
     }
   } catch (err) {
     console.error("Error en notificador automático:", err.message);
   }
-}, 5000); // cada 5 segundos
+}, 5000);
 
 async function checkNotificaciones() {
   const precios = await fetchUsdtMediaAll(); // { buy: 10.52, sell: 10.47 }
@@ -227,11 +240,11 @@ async function checkNotificaciones() {
 
   notificaciones.forEach(async (n) => {
     if (n.tipo === 'buy' && precios.buy >= n.objetivo) {
-      await bot.telegram.sendMessage(n.user_id, `📈 ¡Precio de compra alcanzado! BOB ${precios.buy} ≥ ${n.objetivo}`);
+      await bot.telegram.sendMessage(n.user_id, `¡Precio de compra alcanzado! BOB ${precios.buy} ≥ ${n.objetivo}`);
       await desactivarNotificacion(n.user_id, 'buy'); // opcional: desactiva después de avisar
     }
     if (n.tipo === 'sell' && precios.sell <= n.objetivo) {
-      await bot.telegram.sendMessage(n.user_id, `📉 ¡Precio de venta alcanzado! BOB ${precios.sell} ≤ ${n.objetivo}`);
+      await bot.telegram.sendMessage(n.user_id, `¡Precio de venta alcanzado! BOB ${precios.sell} ≤ ${n.objetivo}`);
       await desactivarNotificacion(n.user_id, 'sell'); // opcional
     }
   });
