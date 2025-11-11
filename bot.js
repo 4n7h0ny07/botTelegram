@@ -37,7 +37,7 @@ bot.hears(/^(hola|hi|hello|hey|buenas|inicio|start|comenzar|empezar|usdt)$/i, (c
       inline_keyboard: [
         [{ text: "Actividad USDT hoy", callback_data: 'usdts' }],
         [{ text: "Crear Notificaciones", callback_data: 'notifications' }],
-        [{ text: "Visita nuestra web", url: "https://qrfassid.website" }],
+        [{ text: "Visita nuestra web", url: "https://fassid.com" }],
         [{ text: "Créditos", callback_data: 'credits' }]
       ]
     }
@@ -169,7 +169,7 @@ bot.hears("Precio de compra", async (ctx) => {
 });
 
 bot.hears("Precio de venta", async (ctx) => {
-  ctx.reply('Ingresa el precio de venta objetivo (ej: 10.20 BOB):');
+  ctx.reply('Ingresa el precio de venta objetivo (ej: 10.20):');
 
   bot.once('text', async (ctx2) => {
     const objetivo = parseFloat(ctx2.message.text);
@@ -220,7 +220,7 @@ setInterval(async () => {
       for (const u of usuarios) {
         await bot.telegram.sendMessage(
           u,
-          `*Hola ${ctx.from.first_name}!* La brecha subió a ${porcentaje.toFixed(2)}% (${diferencia.toFixed(2)} Bs)\nCompra: ${buy} | Venta: ${sell}`,
+          `*Hola !* La brecha subió a ${porcentaje.toFixed(2)}% (${diferencia.toFixed(2)} Bs)\nCompra: ${buy} | Venta: ${sell}`,
           { parse_mode: "Markdown" }
         );
       }
