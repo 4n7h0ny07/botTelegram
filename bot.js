@@ -153,32 +153,39 @@ bot.hears('Brecha', async (ctx) => {
 });
 
 // === NOTIFICACIONES ===
-bot.hears("Precio de compra", async (ctx) => {
-  ctx.reply('Ingresa el precio de compra objetivo (ej: 10.65 BOB):');
-
-  // Escucha la próxima respuesta del usuario
-  bot.once('text', async (ctx2) => {
-    const objetivo = parseFloat(ctx2.message.text);
-    if (isNaN(objetivo)) return ctx2.reply('Por favor ingresa un número válido.');
-
-    // Guarda el precio objetivo en la DB
-    await setNotification(ctx2.from.id, "notify_buy", objetivo);
-
-    ctx2.reply(`Notificación de *precio de compra* activada. Te avisaré cuando llegue a BOB ${objetivo}`, { parse_mode: 'Markdown' });
-  });
-});
+const esperando = {};
 
 bot.hears("Precio de venta", async (ctx) => {
+  esperando[ctx.from.id] = "venta";
   ctx.reply('Ingresa el precio de venta objetivo (ej: 10.20):');
+});
 
-  bot.once('text', async (ctx2) => {
-    const objetivo = parseFloat(ctx2.message.text);
-    if (isNaN(objetivo)) return ctx2.reply('Por favor ingresa un número válido.');
+bot.hears("Precio de compra", async (ctx) => {
+  esperando[ctx.from.id] = "compra";
+  ctx.reply('Ingresa el precio de compra objetivo (ej: 10.65 BOB):');
+});
 
-    await setNotification(ctx2.from.id, "notify_sell", objetivo);
+// Captura cualquier texto que no sea comando
+bot.on("text", async (ctx) => {
+  const estado = esperando[ctx.from.id];
+  if (!estado) return; // No está esperando nada
 
-    ctx2.reply(`Notificación de *precio de venta* activada. Te avisaré cuando baje a BOB ${objetivo}`, { parse_mode: 'Markdown' });
-  });
+  const objetivo = parseFloat(ctx.message.text);
+  if (isNaN(objetivo)) {
+    return ctx.reply('Por favor ingresa un número válido.');
+  }
+
+  if (estado === "venta") {
+    await setNotification(ctx.from.id, "notify_sell", objetivo);
+    ctx.reply(`✅ Notificación de *venta* activada a BOB ${objetivo}`, { parse_mode: 'Markdown' });
+  }
+
+  if (estado === "compra") {
+    await setNotification(ctx.from.id, "notify_buy", objetivo);
+    ctx.reply(`✅ Notificación de *compra* activada a BOB ${objetivo}`, { parse_mode: 'Markdown' });
+  }
+
+  delete esperando[ctx.from.id]; // Limpia el estado
 });
 
 bot.hears("Bre. compra y venta", async (ctx) => {
