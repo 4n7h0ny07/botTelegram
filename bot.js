@@ -177,12 +177,12 @@ bot.on("text", async (ctx) => {
 
   if (estado === "venta") {
     await setNotification(ctx.from.id, "notify_sell", objetivo);
-    ctx.reply(`✅ Notificación de *venta* activada a BOB ${objetivo}`, { parse_mode: 'Markdown' });
+    ctx.reply(`Notificación de *venta* activada a BOB ${objetivo}`, { parse_mode: 'Markdown' });
   }
 
   if (estado === "compra") {
     await setNotification(ctx.from.id, "notify_buy", objetivo);
-    ctx.reply(`✅ Notificación de *compra* activada a BOB ${objetivo}`, { parse_mode: 'Markdown' });
+    ctx.reply(`Notificación de *compra* activada a BOB ${objetivo}`, { parse_mode: 'Markdown' });
   }
 
   delete esperando[ctx.from.id]; // Limpia el estado
@@ -234,7 +234,7 @@ setInterval(async () => {
 
       // ✅ Guardamos el último valor notificado
       ultimaNotificacion = { porcentaje, diferencia };
-      console.log(`Notificación enviada: ${porcentaje.toFixed(2)}%`);
+      console.log(`Notificación enviada a donde: ${porcentaje.toFixed(2)}%`);
     }
   } catch (err) {
     console.error("Error en notificador automático:", err.message);
@@ -258,7 +258,7 @@ async function checkNotificaciones() {
 }
 
 // Ejecutar cada 60 segundos
-setInterval(checkNotificaciones, 60000);
+setInterval(checkNotificaciones, 5000);
 
 // === INICIO DEL BOT ===
 async function launchBot() {
