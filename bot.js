@@ -11,7 +11,7 @@ import axios from 'axios';
 
 // =================== CONFIG ===================
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3015;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 if (!TELEGRAM_TOKEN) {
     console.error('Falta TELEGRAM_TOKEN en .env. Cancelo ejecución.');
