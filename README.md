@@ -5,70 +5,20 @@
 #### ¿Que hace el bot?
 - para iniciar el bot necesitas typear ***/start***
 - el bot te desplega un menu con botones 
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#041D42;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Consultar precios
-  </a>
 
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#041D42;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Activar notificación
+  <a href="#" style="display:inline-block; width:250px; padding:6px 0; margin-bottom:1px;    background:#041D42; color:white; border-radius:8px; text-decoration:none;font-size:14px; font-family:Arial, sans-serif; text-align:center;">Consultar precios
   </a>
-
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#041D42;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Mis notificaciones
+  <a href="#" style=" display:inline-block; width:250px; padding:6px 0; margin-bottom:1px; background:#041D42; color:white; border-radius:8px; text-decoration:none; font-size:14px; font-family:Arial, sans-serif; text-align:center;"> Activar notificación
   </a>
-
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#041D42;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Desactivar todas
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#041D42;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Mis notificaciones
+  </a>
+  <a href="#" style=" display:inline-block; width:250px; padding:6px 0; margin-bottom:1px; background:#041D42; color:white; border-radius:8px; text-decoration:none; font-size:14px; font-family:Arial, sans-serif; text-align:center;"> Desactivar todas
   </a>
 
 
 - si damos un clic en el boton **Consultar precios** del bot nos dara como resultado lo siguiente
 
-``` json
+``` js
             ---USDT P2P---
             Compra: 10.40
             Venta: 10.37
@@ -79,99 +29,23 @@
             Brecha Media: 0.05 pts (-0.45%)
 ```
 - si damos un clir en el primer boton **Activar Notificacion** del bot nos dara el siguiente menu de botones 
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Precio Compra
-  </a>
 
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Precio Venta
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Precio Compra
   </a>
-
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Media Compra
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Precio Venta
   </a>
-
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Media Venta
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Media Compra
   </a>
-
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Brecha Compra/Venta
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Media Venta
   </a>
-
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:0.01px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Brecha Media Compra/Venta
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Brecha Compra/Venta
+  </a>
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:0.01px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Brecha Media Compra/Venta
   </a>
 
   - como resulado si damos clic en los botones **Precio Compra, precio venta, media compra, media venta** nos pedira un valor relacionado 
 
-  ``` json
+  ``` js
         Ingrese límite para price_buy:
         //ingrese el limite para precio de compra segun su preferencia
         10.45
@@ -181,14 +55,14 @@
   - ahora si pulsamos los botones de **Brecha Compra/Venta** o **brecha Media Compra/Venta** solo nos enviara un mensaje:
 
   
-  ``` json
+  ``` js
         //respuesta del bot
         Notificaion Activada:
 
   ```
 - si damos un clic en el boton **Mis Notificaciones** del bot nos dara el siguiente mensaje y menu de botones
 
-```js
+``` js
 
 Tus notificaciones activas:
 
@@ -197,62 +71,15 @@ Tus notificaciones activas:
 3. price_buy (límite: 10.45) //precio de venta
 // y debajo de esto el siguiente menu
 ```
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-   Desactivar gap_avg
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Desactivar gap_avg
   </a>
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-   Desactivar price_sell
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Desactivar price_sell
   </a>
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:1px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Desactivar price_buy
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Desactivar price_buy
   </a>
-  <a href="#" style="
-    display:inline-block;
-    width:250px;
-    padding:6px 0;
-    margin-bottom:0.01px;
-    background:#0C2D59;
-    color:white;
-    border-radius:8px;
-    text-decoration:none;
-    font-size:14px;
-    font-family:Arial, sans-serif;
-    text-align:center;">
-    Vaolver al Menu
+  <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:0.01px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Vaolver al Menu
   </a>
+
 - si clicamos en el boton **Desactivar todas** se desactivaran todas las notificaciones activadas previamente
 
 #### NOTA
@@ -260,7 +87,7 @@ Tus notificaciones activas:
 * la media esta calculado de los primeros 5 anuncios tanto en compra __(BUY)__ como de Venta __(SELL)__
 
 - la ***api-rest*** utilizada en este bot es la de binance
-``` json 
+``` js
 TOKEN_BOT="tu_token_aqui"
 PORT=3000
 BINANCE_API_URL="https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
