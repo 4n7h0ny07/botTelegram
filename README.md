@@ -1,4 +1,4 @@
-#  🤖 bot telegram usd price and coste
+#  🤖 bot Telegram USDT BUY and SELL notificaciones
 
 ### Bot para recibir notificaciones en segun las preferencioa el usuario del bot
 
@@ -87,7 +87,7 @@ Tus notificaciones activas:
 
   <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:1px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Desactivar price_buy
   </a>
-  
+
   <a href="#" style="display:inline-block;width:250px;padding:6px 0;margin-bottom:0.01px;background:#0C2D59;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-family:Arial, sans-serif;text-align:center;">Vaolver al Menu
   </a>
 
