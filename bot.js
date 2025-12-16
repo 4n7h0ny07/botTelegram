@@ -291,19 +291,19 @@ setInterval(async () => {
 
             switch (n.notify_type) {
                 case "price_buy":
-                    if (prices.currentBuy < n.limit_value) triggered = true;
+                    if (prices.currentBuy > n.limit_value) triggered = true;
                     text = `Precio Compra alcanzó ${prices.currentBuy.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "price_sell":
-                    if (prices.currentSell > n.limit_value) triggered = true;
+                    if (prices.currentSell < n.limit_value) triggered = true;
                     text = `Precio Venta alcanzó ${prices.currentSell.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "avg_buy":
-                    if (prices.avgBuy == n.limit_value) triggered = true;
+                    if (prices.avgBuy > n.limit_value) triggered = true;
                     text = `Media Compra alcanzó ${prices.avgBuy.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "avg_sell":
-                    if (prices.avgSell == n.limit_value) triggered = true;
+                    if (prices.avgSell < n.limit_value) triggered = true;
                     text = `Media Venta alcanzó ${prices.avgSell.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "gap_price":
