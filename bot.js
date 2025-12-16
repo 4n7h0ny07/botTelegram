@@ -291,11 +291,11 @@ setInterval(async () => {
 
             switch (n.notify_type) {
                 case "price_buy":
-                    if (prices.currentBuy == n.limit_value) triggered = true;
+                    if (prices.currentBuy < n.limit_value) triggered = true;
                     text = `Precio Compra alcanzó ${prices.currentBuy.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "price_sell":
-                    if (prices.currentSell == n.limit_value) triggered = true;
+                    if (prices.currentSell > n.limit_value) triggered = true;
                     text = `Precio Venta alcanzó ${prices.currentSell.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "avg_buy":
@@ -307,12 +307,12 @@ setInterval(async () => {
                     text = `Media Venta alcanzó ${prices.avgSell.toFixed(2)} = límite ${n.limit_value}`;
                     break;
                 case "gap_price":
-                    if ((prices.currentBuy - prices.currentSell) > 15) triggered = true;
-                    text = `Brecha Compra/venta alcanzó ${(prices.currentBuy - prices.currentSell).toFixed(2)} pts = 15 pts`;
+                    if ((prices.currentBuy - prices.currentSell) > 18) triggered = true;
+                    text = `Brecha Compra/venta alcanzó ${(prices.currentBuy - prices.currentSell).toFixed(2)} pts = 18 pts`;
                     break;
                 case "gap_avg":
-                    if ((prices.avgBuy - prices.avgSell) > 15) triggered = true;
-                    text = `Brecha Media Compra/Venta alcanzó ${(prices.avgBuy - prices.avgSell).toFixed(2)} pts = 15 pts`;
+                    if ((prices.avgBuy - prices.avgSell) > 18) triggered = true;
+                    text = `Brecha Media Compra/Venta alcanzó ${(prices.avgBuy - prices.avgSell).toFixed(2)} pts = 18 pts`;
                     break;
             }
 
