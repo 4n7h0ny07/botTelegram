@@ -1,5 +1,5 @@
 /**
- * index.js - Bot Telegram de notificaciones reactivas USDT P2P Binance
+ * Bot Telegram para consultar precios USDT P2P Binance y crear alertas.
  */
 
 import 'dotenv/config';
@@ -10,17 +10,39 @@ import util from 'util';
 import axios from 'axios';
 
 // =================== CONFIG ===================
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || process.env.TOKEN_BOT;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const DB_FILE = process.env.DB_FILE || './botdata.sqlite';
+const BINANCE_API_URL = process.env.BINANCE_API_URL || 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
+const AVG_ROWS = process.env.AVG_ROWS ? parseInt(process.env.AVG_ROWS, 10) : 5;
+const GAP_DEFAULT_LIMIT = process.env.GAP_DEFAULT_LIMIT ? parseFloat(process.env.GAP_DEFAULT_LIMIT) : 15;
+const CHECK_INTERVAL_MS = process.env.CHECK_INTERVAL_MS ? parseInt(process.env.CHECK_INTERVAL_MS, 10) : 30000;
 
 if (!TELEGRAM_TOKEN) {
-    console.error('Falta TELEGRAM_TOKEN en .env. Cancelo ejecución.');
+    console.error('Falta TELEGRAM_TOKEN o TOKEN_BOT en .env. Cancelo ejecucion.');
     process.exit(1);
 }
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
-const DB_FILE = './botdata.sqlite';
+const app = express();
 let rawDb = null;
+let lastPriceData = null;
+
+const ALERT_TYPES = {
+    price_buy: { label: 'Precio compra', field: 'currentBuy' },
+    price_sell: { label: 'Precio venta', field: 'currentSell' },
+    avg_buy: { label: 'Media compra', field: 'avgBuy' },
+    avg_sell: { label: 'Media venta', field: 'avgSell' },
+    gap_price: { label: 'Brecha compra/venta', field: 'gapPrice' },
+    gap_avg: { label: 'Brecha media compra/venta', field: 'gapAvg' }
+};
+
+const DIRECTIONS = {
+    up: { label: 'sube', operator: '>=' },
+    down: { label: 'baja', operator: '<=' }
+};
+
+const awaitingLimitForUser = {};
 
 // =================== DB ===================
 async function openDatabase(filename) {
@@ -31,8 +53,8 @@ async function openDatabase(filename) {
             db.allAsync = util.promisify(db.all).bind(db);
             db.runAsync = function (sql, params = []) {
                 return new Promise((res, rej) => {
-                    db.run(sql, params, function (err) {
-                        if (err) return rej(err);
+                    db.run(sql, params, function (runErr) {
+                        if (runErr) return rej(runErr);
                         res({ lastID: this.lastID, changes: this.changes });
                     });
                 });
@@ -40,6 +62,11 @@ async function openDatabase(filename) {
             resolve(db);
         });
     });
+}
+
+async function columnExists(tableName, columnName) {
+    const columns = await rawDb.allAsync(`PRAGMA table_info(${tableName})`);
+    return columns.some((column) => column.name === columnName);
 }
 
 async function initDb() {
@@ -61,6 +88,7 @@ async function initDb() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id INTEGER,
             notify_type TEXT,
+            direction TEXT,
             limit_value REAL,
             status TEXT,
             created_at TEXT,
@@ -68,273 +96,390 @@ async function initDb() {
         );
     `);
 
+    if (!(await columnExists('notifications', 'direction'))) {
+        await rawDb.runAsync("ALTER TABLE notifications ADD COLUMN direction TEXT");
+    }
+
     console.log('DB inicializada:', DB_FILE);
 }
 
-// =================== GLOBAL VARIABLES ===================
-let lastPriceData = null;
+// =================== BINANCE ===================
+function averagePrice(rows) {
+    const validRows = rows
+        .slice(0, AVG_ROWS)
+        .map((item) => parseFloat(item?.adv?.price))
+        .filter((price) => Number.isFinite(price));
 
-// =================== FETCH BINANCE ===================
+    if (!validRows.length) return null;
+    return validRows.reduce((sum, price) => sum + price, 0) / validRows.length;
+}
+
 async function fetchUsdtPriceSafe() {
     try {
-        const url = process.env.BINANCE_API_URL || "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
         const headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (compatible; DolarBlueBot/1.0)"
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (compatible; BinanceP2PNotifier/1.0)'
         };
 
         const basePayload = {
-            asset: "USDT",
-            fiat: "BOB",
+            asset: 'USDT',
+            fiat: 'BOB',
             page: 1,
-            rows: 10,
+            rows: Math.max(AVG_ROWS, 1),
             payTypes: [],
-            publisherType: "merchant",
-            transAmount: "0"
+            publisherType: 'merchant',
+            transAmount: '0'
         };
 
         const [buyResp, sellResp] = await Promise.all([
-            axios.post(url, { ...basePayload, tradeType: "BUY" }, { headers }),
-            axios.post(url, { ...basePayload, tradeType: "SELL" }, { headers })
+            axios.post(BINANCE_API_URL, { ...basePayload, tradeType: 'BUY' }, { headers }),
+            axios.post(BINANCE_API_URL, { ...basePayload, tradeType: 'SELL' }, { headers })
         ]);
 
-        const buyData = buyResp.data.data || [];
-        const sellData = sellResp.data.data || [];
+        const buyData = buyResp.data?.data || [];
+        const sellData = sellResp.data?.data || [];
 
-        if (!buyData.length || !sellData.length) return { error: "No hay datos de Binance" };
+        if (!buyData.length || !sellData.length) {
+            return { error: 'No hay datos de Binance' };
+        }
 
-        const currentBuy = parseFloat(buyData[0].adv.price);
-        const currentSell = parseFloat(sellData[0].adv.price);
-        const avgBuy = buyData.slice(0, 10).reduce((s, i) => s + parseFloat(i.adv.price), 0) / 10;
-        const avgSell = sellData.slice(0, 10).reduce((s, i) => s + parseFloat(i.adv.price), 0) / 10;
+        const currentBuy = parseFloat(buyData[0]?.adv?.price);
+        const currentSell = parseFloat(sellData[0]?.adv?.price);
+        const avgBuy = averagePrice(buyData);
+        const avgSell = averagePrice(sellData);
+
+        if (![currentBuy, currentSell, avgBuy, avgSell].every(Number.isFinite)) {
+            return { error: 'Binance devolvio precios invalidos' };
+        }
 
         const gapPrice = currentBuy - currentSell;
         const gapAvg = avgBuy - avgSell;
-        const gapAvgPercent = ((avgSell - avgBuy) / avgBuy) * 100;
+        const gapAvgPercent = avgBuy === 0 ? 0 : (gapAvg / avgBuy) * 100;
 
         lastPriceData = { currentBuy, currentSell, avgBuy, avgSell, gapPrice, gapAvg, gapAvgPercent };
-
-        return { currentBuy, currentSell, avgBuy, avgSell, gapPrice, gapAvg, gapAvgPercent };
+        return lastPriceData;
     } catch (err) {
-        console.error("Error fetchUsdtPriceSafe:", err.message);
+        console.error('Error fetchUsdtPriceSafe:', err.message);
         return { error: err.message };
     }
 }
 
 // =================== HELPERS ===================
 async function ensureUser(telegramUser) {
-    const u = await rawDb.getAsync("SELECT * FROM users WHERE telegram_id = ?", [telegramUser.id]);
-    if (u) return u;
+    const existingUser = await rawDb.getAsync('SELECT * FROM users WHERE telegram_id = ?', [telegramUser.id]);
+    if (existingUser) return existingUser;
+
     const now = new Date().toISOString();
-    const r = await rawDb.runAsync(
-        "INSERT INTO users (telegram_id, username, first_name, last_name, created_at) VALUES (?,?,?,?,?)",
-        [telegramUser.id, telegramUser.username || null, telegramUser.first_name || null, telegramUser.last_name || null, now]
+    const result = await rawDb.runAsync(
+        'INSERT INTO users (telegram_id, username, first_name, last_name, created_at) VALUES (?,?,?,?,?)',
+        [
+            telegramUser.id,
+            telegramUser.username || null,
+            telegramUser.first_name || null,
+            telegramUser.last_name || null,
+            now
+        ]
     );
-    return await rawDb.getAsync("SELECT * FROM users WHERE id = ?", [r.lastID]);
+    return rawDb.getAsync('SELECT * FROM users WHERE id = ?', [result.lastID]);
 }
 
-async function createNotification(chatId, notifyType, limitValue=null) {
+async function createNotification(chatId, notifyType, direction, limitValue) {
     const now = new Date().toISOString();
-    const r = await rawDb.runAsync(
-        "INSERT INTO notifications (chat_id, notify_type, limit_value, status, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-        [chatId, notifyType, limitValue, "active", now, now]
+    const result = await rawDb.runAsync(
+        `INSERT INTO notifications
+            (chat_id, notify_type, direction, limit_value, status, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?)`,
+        [chatId, notifyType, direction, limitValue, 'active', now, now]
     );
-    return await rawDb.getAsync("SELECT * FROM notifications WHERE id=?", [r.lastID]);
+    return rawDb.getAsync('SELECT * FROM notifications WHERE id = ?', [result.lastID]);
 }
 
-async function deactivateNotification(id) {
+async function deactivateNotification(id, chatId = null) {
     const now = new Date().toISOString();
-    await rawDb.runAsync("UPDATE notifications SET status='sent', updated_at=? WHERE id=?", [now, id]);
+    if (chatId) {
+        await rawDb.runAsync(
+            "UPDATE notifications SET status = 'sent', updated_at = ? WHERE id = ? AND chat_id = ?",
+            [now, id, chatId]
+        );
+        return;
+    }
+    await rawDb.runAsync("UPDATE notifications SET status = 'sent', updated_at = ? WHERE id = ?", [now, id]);
 }
 
 async function getActiveNotifications() {
-    return await rawDb.allAsync("SELECT * FROM notifications WHERE status='active'");
+    return rawDb.allAsync("SELECT * FROM notifications WHERE status = 'active'");
 }
 
 async function deactivateAllNotifications(chatId) {
     const now = new Date().toISOString();
-    await rawDb.runAsync("UPDATE notifications SET status='sent', updated_at=? WHERE chat_id=?", [now, chatId]);
+    await rawDb.runAsync(
+        "UPDATE notifications SET status = 'sent', updated_at = ? WHERE chat_id = ? AND status = 'active'",
+        [now, chatId]
+    );
 }
 
-// =================== MENÚ ===================
-function menu() {
+function inferDirection(notification) {
+    if (notification.direction && DIRECTIONS[notification.direction]) return notification.direction;
+    if (['price_sell', 'avg_sell'].includes(notification.notify_type)) return 'down';
+    return 'up';
+}
+
+function getAlertLabel(type) {
+    return ALERT_TYPES[type]?.label || type;
+}
+
+function formatPriceMessage(prices) {
+    return [
+        '---USDT P2P---',
+        `Compra: ${prices.currentBuy.toFixed(2)}`,
+        `Venta: ${prices.currentSell.toFixed(2)}`,
+        '---MEDIA---',
+        `Compra: ${prices.avgBuy.toFixed(2)}`,
+        `Venta: ${prices.avgSell.toFixed(2)}`,
+        `Brecha precio: ${prices.gapPrice.toFixed(2)} pts`,
+        `Brecha media: ${prices.gapAvg.toFixed(2)} pts (${prices.gapAvgPercent.toFixed(2)}%)`
+    ].join('\n');
+}
+
+function notificationSummary(notification) {
+    const direction = DIRECTIONS[inferDirection(notification)]?.label || 'sube';
+    return `${getAlertLabel(notification.notify_type)} ${direction} a ${Number(notification.limit_value).toFixed(2)}`;
+}
+
+// =================== MENUS ===================
+function mainMenu() {
     return {
         reply_markup: {
             inline_keyboard: [
-                [{ text: "Consultar precios", callback_data: "menu_prices" }],
-                [{ text: "Activar notificación", callback_data: "menu_activate" }],
-                [{ text: "Mis notificaciones", callback_data: "menu_mydata" }],
-                [{ text: "Desactivar todas", callback_data: "menu_deactivate_all" }]
+                [{ text: 'Consultar precios', callback_data: 'menu_prices' }],
+                [{ text: 'Activar notificacion', callback_data: 'menu_activate' }],
+                [{ text: 'Mis notificaciones', callback_data: 'menu_mydata' }],
+                [{ text: 'Desactivar todas', callback_data: 'menu_deactivate_all' }]
             ]
         }
     };
 }
 
-// =================== COMANDO /start ===================
+function alertTypeMenu() {
+    return {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: 'Precio compra', callback_data: 'notify_price_buy' }],
+                [{ text: 'Precio venta', callback_data: 'notify_price_sell' }],
+                [{ text: 'Media compra', callback_data: 'notify_avg_buy' }],
+                [{ text: 'Media venta', callback_data: 'notify_avg_sell' }],
+                [{ text: 'Brecha compra/venta', callback_data: 'notify_gap_price' }],
+                [{ text: 'Brecha media compra/venta', callback_data: 'notify_gap_avg' }],
+                [{ text: 'Volver al menu', callback_data: 'menu_main' }]
+            ]
+        }
+    };
+}
+
+function directionMenu(notifyType) {
+    return {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: 'Avisar si sube', callback_data: `direction_${notifyType}_up` }],
+                [{ text: 'Avisar si baja', callback_data: `direction_${notifyType}_down` }],
+                [{ text: 'Volver', callback_data: 'menu_activate' }]
+            ]
+        }
+    };
+}
+
+// =================== TELEGRAM ===================
 bot.onText(/\/start/, async (msg) => {
     try {
         await ensureUser(msg.from);
-        await bot.sendMessage(msg.chat.id, `Hola ${msg.from.first_name || ""}!`, menu());
+        await bot.sendMessage(msg.chat.id, `Hola ${msg.from.first_name || ''}.`, mainMenu());
     } catch (err) {
-        console.error("/start err", err.message);
+        console.error('/start err', err.message);
     }
 });
 
-// =================== CALLBACK QUERY ===================
-const awaitingLimitForUser = {}; // Para pedir límites cuando aplica
-
-bot.on("callback_query", async (query) => {
+bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
-    const user = await ensureUser(query.from);
     const data = query.data;
 
     try {
-        if (data === "menu_prices") {
-            const p = await fetchUsdtPriceSafe();
-            if (p.error) return bot.sendMessage(chatId, `Error al obtener precios: ${p.error}`);
+        const user = await ensureUser(query.from);
 
-            const text = `
-            ---USDT P2P---
-            Compra: ${p.currentBuy.toFixed(2)}
-            Venta: ${p.currentSell.toFixed(2)}
-            ---MEDIA---
-            Compra: ${p.avgBuy.toFixed(2)}
-            Venta: ${p.avgSell.toFixed(2)}
-            Brecha Precio: ${p.gapPrice.toFixed(2)} pts
-            Brecha Media: ${p.gapAvg.toFixed(2)} pts (${p.gapAvgPercent.toFixed(2)}%)`;
-            await bot.sendMessage(chatId, text);
-
-        } else if (data === "menu_activate") {
-            const keyboard = [
-                [{ text: "Precio Compra ", callback_data: "notify_price_buy" }],
-                [{ text: "Precio Venta ", callback_data: "notify_price_sell" }],
-                [{ text: "Media Compra ", callback_data: "notify_avg_buy" }],
-                [{ text: "Media Venta ", callback_data: "notify_avg_sell" }],
-                [{ text: "Brecha Compra/Venta ", callback_data: "notify_gap_price" }],
-                [{ text: "Brecha Media Compra/Venta ", callback_data: "notify_gap_avg" }]
-            ];
-            await bot.sendMessage(chatId, "Seleccione notificación a activar:", { reply_markup: { inline_keyboard: keyboard } });
-
-        } else if (data === "menu_deactivate_all") {
-            await deactivateAllNotifications(chatId);
-            await bot.sendMessage(chatId, "Todas las notificaciones desactivadas.");
-
-        } else if (data === "menu_mydata") {
-            const notes = await rawDb.allAsync("SELECT * FROM notifications WHERE chat_id=? AND status='active'", [chatId]);
-            if (!notes.length) return bot.sendMessage(chatId, "No tienes notificaciones activas.");
-
-            let text = "Tus notificaciones activas:\n";
-            notes.forEach((n, i) => {
-                text += `\n${i+1}. ${n.notify_type}${n.limit_value !== null ? ` (límite: ${n.limit_value})` : ""} [ID: ${n.id}]`;
-            });
-
-            const keyboard = notes.map(n => [{ text: `Desactivar ${n.notify_type}`, callback_data: `deactivate_${n.id}` }]);
-            keyboard.push([{ text: "Volver al menú", callback_data: "menu_main" }]);
-            await bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: keyboard } });
-
-        } else if (data.startsWith("notify_")) {
-            const notifyType = data.replace("notify_", "");
-            if (notifyType === "gap_price" || notifyType === "gap_avg") {
-                await createNotification(chatId, notifyType);
-                await bot.sendMessage(chatId, `Notificación activada.`);
-            } else {
-                awaitingLimitForUser[user.telegram_id] = { notifyType, chatId };
-                await bot.sendMessage(chatId, `Ingrese límite para ${notifyType}:`);
+        if (data === 'menu_prices') {
+            const prices = await fetchUsdtPriceSafe();
+            if (prices.error) {
+                await bot.sendMessage(chatId, `Error al obtener precios: ${prices.error}`);
+                return;
             }
-
-        } else if (data.startsWith("deactivate_")) {
-            const id = parseInt(data.replace("deactivate_", ""));
-            await deactivateNotification(id);
-            await bot.sendMessage(chatId, `Notificación ID ${id} desactivada.`);
-
-        } else if (data === "menu_main") {
-            await bot.sendMessage(chatId, "Menú principal:", menu());
+            await bot.sendMessage(chatId, formatPriceMessage(prices));
+            return;
         }
 
+        if (data === 'menu_activate') {
+            await bot.sendMessage(chatId, 'Seleccione que precio desea vigilar:', alertTypeMenu());
+            return;
+        }
+
+        if (data === 'menu_deactivate_all') {
+            await deactivateAllNotifications(chatId);
+            await bot.sendMessage(chatId, 'Todas las notificaciones activas fueron desactivadas.');
+            return;
+        }
+
+        if (data === 'menu_mydata') {
+            const notifications = await rawDb.allAsync(
+                "SELECT * FROM notifications WHERE chat_id = ? AND status = 'active' ORDER BY id DESC",
+                [chatId]
+            );
+
+            if (!notifications.length) {
+                await bot.sendMessage(chatId, 'No tienes notificaciones activas.');
+                return;
+            }
+
+            const text = [
+                'Tus notificaciones activas:',
+                ...notifications.map((notification, index) => `${index + 1}. ${notificationSummary(notification)} [ID: ${notification.id}]`)
+            ].join('\n');
+            const keyboard = notifications.map((notification) => [
+                { text: `Desactivar ${getAlertLabel(notification.notify_type)}`, callback_data: `deactivate_${notification.id}` }
+            ]);
+            keyboard.push([{ text: 'Volver al menu', callback_data: 'menu_main' }]);
+
+            await bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: keyboard } });
+            return;
+        }
+
+        if (data.startsWith('notify_')) {
+            const notifyType = data.replace('notify_', '');
+            if (!ALERT_TYPES[notifyType]) {
+                await bot.sendMessage(chatId, 'Tipo de notificacion no valido.');
+                return;
+            }
+            delete awaitingLimitForUser[user.telegram_id];
+            await bot.sendMessage(chatId, `Seleccione condicion para ${getAlertLabel(notifyType)}:`, directionMenu(notifyType));
+            return;
+        }
+
+        if (data.startsWith('direction_')) {
+            const parts = data.split('_');
+            const direction = parts.pop();
+            const notifyType = parts.slice(1).join('_');
+
+            if (!ALERT_TYPES[notifyType] || !DIRECTIONS[direction]) {
+                await bot.sendMessage(chatId, 'Condicion de notificacion no valida.');
+                return;
+            }
+
+            awaitingLimitForUser[user.telegram_id] = { notifyType, direction, chatId };
+            const defaultHint = notifyType.startsWith('gap_') ? ` Ejemplo: ${GAP_DEFAULT_LIMIT}` : '';
+            await bot.sendMessage(
+                chatId,
+                `Ingrese el limite para ${getAlertLabel(notifyType)} cuando ${DIRECTIONS[direction].label}.${defaultHint}`
+            );
+            return;
+        }
+
+        if (data.startsWith('deactivate_')) {
+            const id = parseInt(data.replace('deactivate_', ''), 10);
+            if (!Number.isInteger(id)) {
+                await bot.sendMessage(chatId, 'ID de notificacion no valido.');
+                return;
+            }
+            await deactivateNotification(id, chatId);
+            await bot.sendMessage(chatId, `Notificacion ID ${id} desactivada.`);
+            return;
+        }
+
+        if (data === 'menu_main') {
+            await bot.sendMessage(chatId, 'Menu principal:', mainMenu());
+        }
     } catch (err) {
-        console.error("Callback err:", err.message);
+        console.error('Callback err:', err.message);
+        await bot.sendMessage(chatId, 'Ocurrio un error procesando la accion.');
     } finally {
-        try { 
-            await bot.answerCallbackQuery(query.id); 
+        try {
+            await bot.answerCallbackQuery(query.id);
         } catch (err) {
-            if (err?.name === "AggregateError") console.warn("Ignorado AggregateError en answerCallbackQuery");
-            else console.error("answerCallbackQuery error:", err.message);
+            console.error('answerCallbackQuery error:', err.message);
         }
     }
 });
 
-// =================== HANDLER PARA LÍMITES ===================
-bot.on("message", async (msg) => {
-    if (msg.text.startsWith("/")) return;
+bot.on('message', async (msg) => {
+    if (!msg.text || msg.text.startsWith('/')) return;
 
     const state = awaitingLimitForUser[msg.from.id];
     if (!state) return;
 
     const limit = parseFloat(msg.text.replace(',', '.'));
-    if (isNaN(limit)) return bot.sendMessage(msg.chat.id, "Valor inválido. Ingrese un número.");
+    if (!Number.isFinite(limit)) {
+        await bot.sendMessage(msg.chat.id, 'Valor invalido. Ingrese un numero, por ejemplo 10.45.');
+        return;
+    }
 
-    await createNotification(state.chatId, state.notifyType, limit);
-    await bot.sendMessage(msg.chat.id, `Notificación ${state.notifyType} activada con límite ${limit}`);
+    await createNotification(state.chatId, state.notifyType, state.direction, limit);
+    await bot.sendMessage(
+        msg.chat.id,
+        `Notificacion activada: ${getAlertLabel(state.notifyType)} ${DIRECTIONS[state.direction].label} a ${limit.toFixed(2)}.`
+    );
     delete awaitingLimitForUser[msg.from.id];
 });
 
 // =================== SCHEDULER ===================
-setInterval(async () => {
+async function checkNotifications() {
     try {
         const prices = await fetchUsdtPriceSafe();
         if (prices.error) return;
 
         const notifications = await getActiveNotifications();
-        for (const n of notifications) {
-            let triggered = false;
-            let text = "";
+        for (const notification of notifications) {
+            const alertType = ALERT_TYPES[notification.notify_type];
+            if (!alertType) continue;
 
-            switch (n.notify_type) {
-                case "price_buy":
-                    if (prices.currentBuy > n.limit_value) triggered = true;
-                    text = `Precio Compra alcanzó ${prices.currentBuy.toFixed(2)} = límite ${n.limit_value}`;
-                    break;
-                case "price_sell":
-                    if (prices.currentSell < n.limit_value) triggered = true;
-                    text = `Precio Venta alcanzó ${prices.currentSell.toFixed(2)} = límite ${n.limit_value}`;
-                    break;
-                case "avg_buy":
-                    if (prices.avgBuy > n.limit_value) triggered = true;
-                    text = `Media Compra alcanzó ${prices.avgBuy.toFixed(2)} = límite ${n.limit_value}`;
-                    break;
-                case "avg_sell":
-                    if (prices.avgSell < n.limit_value) triggered = true;
-                    text = `Media Venta alcanzó ${prices.avgSell.toFixed(2)} = límite ${n.limit_value}`;
-                    break;
-                case "gap_price":
-                    if ((prices.currentBuy - prices.currentSell) > 18) triggered = true;
-                    text = `Brecha Compra/venta alcanzó ${(prices.currentBuy - prices.currentSell).toFixed(2)} pts = 18 pts`;
-                    break;
-                case "gap_avg":
-                    if ((prices.avgBuy - prices.avgSell) > 18) triggered = true;
-                    text = `Brecha Media Compra/Venta alcanzó ${(prices.avgBuy - prices.avgSell).toFixed(2)} pts = 18 pts`;
-                    break;
-            }
+            const direction = inferDirection(notification);
+            const currentValue = prices[alertType.field];
+            const limitValue = Number(notification.limit_value);
+            if (!Number.isFinite(currentValue) || !Number.isFinite(limitValue)) continue;
 
-            if (triggered) {
-                await bot.sendMessage(n.chat_id, `🔔 Notificación:\n ${text}`);
-                await deactivateNotification(n.id);
-            }
+            const triggered = direction === 'up'
+                ? currentValue >= limitValue
+                : currentValue <= limitValue;
+
+            if (!triggered) continue;
+
+            await bot.sendMessage(
+                notification.chat_id,
+                [
+                    'Notificacion:',
+                    `${alertType.label} ${DIRECTIONS[direction].label}.`,
+                    `Actual: ${currentValue.toFixed(2)}`,
+                    `Limite: ${limitValue.toFixed(2)}`
+                ].join('\n')
+            );
+            await deactivateNotification(notification.id);
         }
-
     } catch (err) {
-        console.error("Scheduler error:", err.message);
+        console.error('Scheduler error:', err.message);
     }
-}, 30000);
+}
 
-// =================== EXPRESS /status ===================
-const app = express();
-app.get("/status", async (req, res) => {
+setInterval(checkNotifications, CHECK_INTERVAL_MS);
+
+// =================== EXPRESS ===================
+app.get('/status', async (req, res) => {
     try {
-        const row = await rawDb.getAsync("SELECT COUNT(*) as c FROM notifications WHERE status='active'");
-        res.json({ status: "ok", active_notifications: row.c, last_price_data: lastPriceData, server_time: new Date().toISOString() });
+        const row = await rawDb.getAsync("SELECT COUNT(*) as c FROM notifications WHERE status = 'active'");
+        res.json({
+            status: 'ok',
+            active_notifications: row.c,
+            last_price_data: lastPriceData,
+            avg_rows: AVG_ROWS,
+            check_interval_ms: CHECK_INTERVAL_MS,
+            server_time: new Date().toISOString()
+        });
     } catch (err) {
-        res.status(500).json({ status: "error", error: err.message });
+        res.status(500).json({ status: 'error', error: err.message });
     }
 });
 
