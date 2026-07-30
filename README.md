@@ -50,7 +50,7 @@ BINANCE_API_URL=https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search
 AVG_ROWS=5
 GAP_DEFAULT_LIMIT=15
 CHECK_INTERVAL_MS=30000
-BCB_EXCHANGE_URL=https://www.bcb.gob.bo/librerias/indicadores/dolar/bolsin.php
+BCB_EXCHANGE_URL=
 BCB_CHECK_INTERVAL_MS=300000
 BCB_CHECK_START_HOUR=20
 ```
