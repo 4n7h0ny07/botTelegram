@@ -21,6 +21,9 @@ Bot de Telegram para consultar precios de compra y venta de USDT en Binance P2P 
 - Cuando una alerta se cumple, envia el mensaje y la desactiva automaticamente.
 - `Mis notificaciones` lista las alertas activas y permite desactivarlas una por una.
 - `Desactivar todas` desactiva todas las alertas activas del chat.
+- Desde las 20:00 (hora de Bolivia) revisa la cotizacion oficial USD del BCB.
+- Si el BCB publica un valor nuevo, lo envia a todos los usuarios registrados.
+- La ultima cotizacion observada se guarda en SQLite para no repetir mensajes.
 
 ## Ejemplo de precios
 
@@ -47,9 +50,16 @@ BINANCE_API_URL=https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search
 AVG_ROWS=5
 GAP_DEFAULT_LIMIT=15
 CHECK_INTERVAL_MS=30000
+BCB_EXCHANGE_URL=https://www.bcb.gob.bo/librerias/indicadores/dolar/bolsin.php
+BCB_CHECK_INTERVAL_MS=300000
+BCB_CHECK_START_HOUR=20
 ```
 
 `AVG_ROWS` define cuantos anuncios se usan para calcular la media. `CHECK_INTERVAL_MS` define cada cuantos milisegundos se revisan las alertas.
+
+`BCB_CHECK_START_HOUR` usa la hora de Bolivia (`America/La_Paz`). La primera
+lectura del BCB se guarda como referencia y no genera un mensaje; los cambios
+posteriores se notifican automaticamente.
 
 ## Ejecutar
 

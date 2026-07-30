@@ -17,6 +17,14 @@ const BINANCE_API_URL = process.env.BINANCE_API_URL || 'https://p2p.binance.com/
 const AVG_ROWS = process.env.AVG_ROWS ? parseInt(process.env.AVG_ROWS, 10) : 5;
 const GAP_DEFAULT_LIMIT = process.env.GAP_DEFAULT_LIMIT ? parseFloat(process.env.GAP_DEFAULT_LIMIT) : 15;
 const CHECK_INTERVAL_MS = process.env.CHECK_INTERVAL_MS ? parseInt(process.env.CHECK_INTERVAL_MS, 10) : 30000;
+const BCB_EXCHANGE_URL = process.env.BCB_EXCHANGE_URL || 'https://www.bcb.gob.bo/librerias/indicadores/dolar/bolsin.php';
+const BCB_CHECK_INTERVAL_MS = process.env.BCB_CHECK_INTERVAL_MS
+    ? parseInt(process.env.BCB_CHECK_INTERVAL_MS, 10)
+    : 5 * 60 * 1000;
+const BCB_CHECK_START_HOUR = process.env.BCB_CHECK_START_HOUR
+    ? parseInt(process.env.BCB_CHECK_START_HOUR, 10)
+    : 20;
+const BOLIVIA_TIME_ZONE = 'America/La_Paz';
 
 if (!TELEGRAM_TOKEN) {
     console.error('Falta TELEGRAM_TOKEN o TOKEN_BOT en .env. Cancelo ejecucion.');
@@ -76,6 +84,7 @@ async function initDb() {
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             telegram_id INTEGER UNIQUE,
+            chat_id INTEGER,
             username TEXT,
             first_name TEXT,
             last_name TEXT,
@@ -99,6 +108,20 @@ async function initDb() {
     if (!(await columnExists('notifications', 'direction'))) {
         await rawDb.runAsync("ALTER TABLE notifications ADD COLUMN direction TEXT");
     }
+
+    if (!(await columnExists('users', 'chat_id'))) {
+        await rawDb.runAsync("ALTER TABLE users ADD COLUMN chat_id INTEGER");
+    }
+
+    await rawDb.runAsync(`
+        CREATE TABLE IF NOT EXISTS bcb_exchange_rate_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            value REAL NOT NULL,
+            effective_date TEXT,
+            fingerprint TEXT NOT NULL,
+            observed_at TEXT NOT NULL
+        );
+    `);
 
     console.log('DB inicializada:', DB_FILE);
 }
@@ -164,16 +187,133 @@ async function fetchUsdtPriceSafe() {
     }
 }
 
+// =================== BCB ===================
+function htmlToText(html) {
+    return String(html)
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;|&#160;/gi, ' ')
+        .replace(/&oacute;|&#243;/gi, 'ó')
+        .replace(/&aacute;|&#225;/gi, 'á')
+        .replace(/&eacute;|&#233;/gi, 'é')
+        .replace(/&iacute;|&#237;/gi, 'í')
+        .replace(/&uacute;|&#250;/gi, 'ú')
+        .replace(/&ntilde;|&#241;/gi, 'ñ')
+        .replace(/&[^;]+;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function parseBcbExchangeRate(html) {
+    const text = htmlToText(html);
+    const patterns = [
+        /vigente\s+desde\s+el\s+([^:]{3,80}?)\s*:\s*Bs\.?\s*([0-9]+(?:[.,][0-9]+)?)\s*por\s*1\s*US\$?/i,
+        /tipo\s+de\s+cambio\s+oficial[\s\S]{0,200}?USD[\s\S]{0,80}?([0-9]+(?:[.,][0-9]+)?)/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (!match) continue;
+
+        const hasEffectiveDate = match.length === 3;
+        const rawValue = hasEffectiveDate ? match[2] : match[1];
+        const value = Number(rawValue.replace(',', '.'));
+        if (!Number.isFinite(value) || value <= 0) continue;
+
+        return {
+            value,
+            effectiveDate: hasEffectiveDate ? match[1].trim() : null
+        };
+    }
+
+    throw new Error('No se pudo encontrar la cotizacion USD en la pagina del BCB');
+}
+
+async function fetchBcbExchangeRate() {
+    const response = await axios.get(BCB_EXCHANGE_URL, {
+        timeout: 15000,
+        responseType: 'text',
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; TelegramBCBNotifier/1.0)',
+            Accept: 'text/html,application/xhtml+xml'
+        }
+    });
+    return parseBcbExchangeRate(response.data);
+}
+
+function getBoliviaHour(date = new Date()) {
+    const hour = new Intl.DateTimeFormat('en-US', {
+        timeZone: BOLIVIA_TIME_ZONE,
+        hour: '2-digit',
+        hourCycle: 'h23'
+    }).format(date);
+    return Number(hour);
+}
+
+function formatBcbMessage(rate) {
+    return [
+        '📢 Precio oficial del USD actualizado',
+        '',
+        `1 USD = Bs ${rate.value.toFixed(2)}`,
+        rate.effectiveDate ? `Vigente desde: ${rate.effectiveDate}` : null,
+        '',
+        'Fuente: Banco Central de Bolivia (BCB)',
+        BCB_EXCHANGE_URL
+    ].filter((line) => line !== null).join('\n');
+}
+
+async function broadcastBcbRate(rate) {
+    const recipients = await rawDb.allAsync(`
+        SELECT DISTINCT COALESCE(chat_id, telegram_id) AS chat_id
+        FROM users
+        WHERE COALESCE(chat_id, telegram_id) IS NOT NULL
+    `);
+    let sent = 0;
+    let failed = 0;
+
+    for (const recipient of recipients) {
+        try {
+            await bot.sendMessage(recipient.chat_id, formatBcbMessage(rate), {
+                disable_web_page_preview: true
+            });
+            sent += 1;
+        } catch (err) {
+            failed += 1;
+            console.error(`No se pudo notificar BCB al chat ${recipient.chat_id}:`, err.message);
+        }
+        // Mantiene el envio por debajo del limite general de Telegram.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    console.log(`Notificacion BCB finalizada. Enviados: ${sent}, fallidos: ${failed}`);
+}
+
 // =================== HELPERS ===================
-async function ensureUser(telegramUser) {
+async function ensureUser(telegramUser, chatId = telegramUser.id) {
     const existingUser = await rawDb.getAsync('SELECT * FROM users WHERE telegram_id = ?', [telegramUser.id]);
-    if (existingUser) return existingUser;
+    if (existingUser) {
+        await rawDb.runAsync(
+            `UPDATE users
+             SET chat_id = ?, username = ?, first_name = ?, last_name = ?
+             WHERE telegram_id = ?`,
+            [
+                chatId,
+                telegramUser.username || null,
+                telegramUser.first_name || null,
+                telegramUser.last_name || null,
+                telegramUser.id
+            ]
+        );
+        return rawDb.getAsync('SELECT * FROM users WHERE telegram_id = ?', [telegramUser.id]);
+    }
 
     const now = new Date().toISOString();
     const result = await rawDb.runAsync(
-        'INSERT INTO users (telegram_id, username, first_name, last_name, created_at) VALUES (?,?,?,?,?)',
+        'INSERT INTO users (telegram_id, chat_id, username, first_name, last_name, created_at) VALUES (?,?,?,?,?,?)',
         [
             telegramUser.id,
+            chatId,
             telegramUser.username || null,
             telegramUser.first_name || null,
             telegramUser.last_name || null,
@@ -291,7 +431,7 @@ function directionMenu(notifyType) {
 // =================== TELEGRAM ===================
 bot.onText(/\/start/, async (msg) => {
     try {
-        await ensureUser(msg.from);
+        await ensureUser(msg.from, msg.chat.id);
         await bot.sendMessage(msg.chat.id, `Hola ${msg.from.first_name || ''}.`, mainMenu());
     } catch (err) {
         console.error('/start err', err.message);
@@ -303,7 +443,7 @@ bot.on('callback_query', async (query) => {
     const data = query.data;
 
     try {
-        const user = await ensureUser(query.from);
+        const user = await ensureUser(query.from, chatId);
 
         if (data === 'menu_prices') {
             const prices = await fetchUsdtPriceSafe();
@@ -464,18 +604,71 @@ async function checkNotifications() {
     }
 }
 
-setInterval(checkNotifications, CHECK_INTERVAL_MS);
+async function checkBcbExchangeRate() {
+    if (getBoliviaHour() < BCB_CHECK_START_HOUR) return;
+
+    try {
+        const rate = await fetchBcbExchangeRate();
+        const fingerprint = rate.value.toFixed(6);
+        const previous = await rawDb.getAsync(
+            'SELECT * FROM bcb_exchange_rate_state WHERE id = 1'
+        );
+
+        if (!previous) {
+            await rawDb.runAsync(
+                `INSERT INTO bcb_exchange_rate_state
+                    (id, value, effective_date, fingerprint, observed_at)
+                 VALUES (1, ?, ?, ?, ?)`,
+                [rate.value, rate.effectiveDate, fingerprint, new Date().toISOString()]
+            );
+            console.log(`Linea base BCB guardada: Bs ${rate.value.toFixed(2)}`);
+            return;
+        }
+
+        if (Number(previous.value) === rate.value) {
+            if (previous.effective_date !== rate.effectiveDate || previous.fingerprint !== fingerprint) {
+                await rawDb.runAsync(
+                    `UPDATE bcb_exchange_rate_state
+                     SET effective_date = ?, fingerprint = ?, observed_at = ?
+                     WHERE id = 1`,
+                    [rate.effectiveDate, fingerprint, new Date().toISOString()]
+                );
+            }
+            return;
+        }
+
+        await rawDb.runAsync(
+            `UPDATE bcb_exchange_rate_state
+             SET value = ?, effective_date = ?, fingerprint = ?, observed_at = ?
+             WHERE id = 1`,
+            [rate.value, rate.effectiveDate, fingerprint, new Date().toISOString()]
+        );
+        await broadcastBcbRate(rate);
+    } catch (err) {
+        console.error('Error revisando cotizacion BCB:', err.message);
+    }
+}
 
 // =================== EXPRESS ===================
 app.get('/status', async (req, res) => {
     try {
         const row = await rawDb.getAsync("SELECT COUNT(*) as c FROM notifications WHERE status = 'active'");
+        const bcbState = await rawDb.getAsync('SELECT * FROM bcb_exchange_rate_state WHERE id = 1');
         res.json({
             status: 'ok',
             active_notifications: row.c,
             last_price_data: lastPriceData,
             avg_rows: AVG_ROWS,
             check_interval_ms: CHECK_INTERVAL_MS,
+            bcb_exchange_rate: bcbState
+                ? {
+                    value: bcbState.value,
+                    effective_date: bcbState.effective_date,
+                    observed_at: bcbState.observed_at
+                }
+                : null,
+            bcb_check_start_hour: BCB_CHECK_START_HOUR,
+            bcb_check_interval_ms: BCB_CHECK_INTERVAL_MS,
             server_time: new Date().toISOString()
         });
     } catch (err) {
@@ -486,5 +679,9 @@ app.get('/status', async (req, res) => {
 // =================== INIT ===================
 (async () => {
     await initDb();
+    setInterval(checkNotifications, CHECK_INTERVAL_MS);
+    setInterval(checkBcbExchangeRate, BCB_CHECK_INTERVAL_MS);
+    checkNotifications();
+    checkBcbExchangeRate();
     app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
 })();
