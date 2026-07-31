@@ -481,8 +481,13 @@ function getPageGapAlertLevel(difference) {
     return 'alert15';
 }
 
+function getPageSideLabel(side) {
+    return side === 'BUY' ? 'Compra' : 'Venta';
+}
+
 function formatPageGapMessage({ alertLevel, leadingSide, buyPages, sellPages, difference }) {
     const isBuyLeading = leadingSide === 'BUY';
+    const leadingSideLabel = getPageSideLabel(leadingSide);
     const heading = alertLevel === 'alert10'
         ? 'Alerta 10 - Notificacion informativa'
         : 'Alerta: mas de 15 paginas de diferencia - Notificacion importante';
@@ -490,10 +495,10 @@ function formatPageGapMessage({ alertLevel, leadingSide, buyPages, sellPages, di
     return [
         heading,
         '',
-        `${leadingSide} tiene mas paginas.`,
+        `${leadingSideLabel} tiene mas paginas.`,
         isBuyLeading ? 'Es hora de comprar.' : 'Es hora de vender.',
         `Diferencia: ${difference} paginas.`,
-        `BUY: ${buyPages} paginas | SELL: ${sellPages} paginas`
+        `Compra: ${buyPages} paginas | Venta: ${sellPages} paginas`
     ].join('\n');
 }
 
@@ -513,15 +518,15 @@ function formatManualPageGapMessage(prices) {
             : 'Alerta: mas de 15 paginas - Importante';
 
     const result = !leadingSide
-        ? 'BUY y SELL tienen la misma cantidad de paginas.'
-        : `${leadingSide} tiene mas paginas. ${leadingSide === 'BUY' ? 'Es hora de comprar.' : 'Es hora de vender.'}`;
+        ? 'Compra y Venta tienen la misma cantidad de paginas.'
+        : `${getPageSideLabel(leadingSide)} tiene mas paginas. ${leadingSide === 'BUY' ? 'Es hora de comprar.' : 'Es hora de vender.'}`;
 
     return [
-        'Diferencia de paginas BUY/SELL',
+        'Diferencia de paginas Compra/Venta',
         '',
         `Estado: ${status}`,
-        `BUY: ${buyPages} paginas`,
-        `SELL: ${sellPages} paginas`,
+        `Compra: ${buyPages} paginas`,
+        `Venta: ${sellPages} paginas`,
         `Diferencia: ${difference} paginas`,
         '',
         result
@@ -626,7 +631,7 @@ function mainMenu() {
         reply_markup: {
             inline_keyboard: [
                 [{ text: 'Consultar precios', callback_data: 'menu_prices' }],
-                [{ text: '📊 Diferencia paginas BUY/SELL', callback_data: 'menu_page_gap' }],
+                [{ text: 'Diferencia paginas Compra/Venta', callback_data: 'menu_page_gap' }],
                 [{ text: 'Activar notificacion', callback_data: 'menu_activate' }],
                 [{ text: 'Mis notificaciones', callback_data: 'menu_mydata' }],
                 [{ text: 'Desactivar todas', callback_data: 'menu_deactivate_all' }]

@@ -24,15 +24,15 @@ Bot de Telegram para consultar precios de compra y venta de USDT en Binance P2P 
 - Desde las 20:00 (hora de Bolivia) revisa la cotizacion oficial USD del BCB.
 - Si el BCB publica un valor nuevo, lo envia a todos los usuarios registrados.
 - La ultima cotizacion observada se guarda en SQLite para no repetir mensajes.
-- Compara automaticamente las paginas de anuncios BUY y SELL usando solamente
+- Compara automaticamente las paginas de anuncios de compra y venta usando solamente
   anunciantes verificados y excluyendo anuncios destacados.
-- El boton `📊 Diferencia paginas BUY/SELL` permite consultar el desfase manualmente
+- El boton `Diferencia paginas Compra/Venta` permite consultar el desfase manualmente
   sin consumir el limite de avisos automaticos.
 - Una diferencia de 0 a 4 paginas es normal y no genera mensajes automaticos.
 - De 5 a 15 paginas envia una notificacion informativa a todos los usuarios.
 - Desde 16 paginas envia una notificacion importante a todos los usuarios.
 - La alerta indica que lado tiene mas paginas, la diferencia y si es hora de
-  comprar (BUY) o vender (SELL).
+  comprar o vender.
 - La revision de paginas ocurre en intervalos aleatorios de 5 a 10 minutos.
 - Los recordatorios respetan una espera de 4 horas y un maximo de 4 envios
   automaticos por dia, usando la fecha de Bolivia.
@@ -75,7 +75,7 @@ BCB_CHECK_START_HOUR=20
 
 `AVG_ROWS` define cuantos anuncios se usan para calcular la media.
 `P2P_PAGE_SIZE` define cuantos anuncios representan una pagina para comparar
-BUY y SELL. Para esa comparacion se exige que Binance identifique al anunciante
+compra y venta. Para esa comparacion se exige que Binance identifique al anunciante
 como comerciante verificado (`merchant`, grado 3 o superior e identidad
 comercial) y al anuncio como normal (`profession`); cualquier resultado
 destacado (`mass`) queda excluido. `CHECK_INTERVAL_MS` define cada cuantos
