@@ -15,6 +15,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DB_FILE = process.env.DB_FILE || './botdata.sqlite';
 const BINANCE_API_URL = process.env.BINANCE_API_URL || 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
 const AVG_ROWS = process.env.AVG_ROWS ? parseInt(process.env.AVG_ROWS, 10) : 5;
+const P2P_PAGE_SIZE = process.env.P2P_PAGE_SIZE ? parseInt(process.env.P2P_PAGE_SIZE, 10) : 10;
 const GAP_DEFAULT_LIMIT = process.env.GAP_DEFAULT_LIMIT ? parseFloat(process.env.GAP_DEFAULT_LIMIT) : 15;
 const CHECK_INTERVAL_MS = process.env.CHECK_INTERVAL_MS ? parseInt(process.env.CHECK_INTERVAL_MS, 10) : 30000;
 const BCB_EXCHANGE_URL = process.env.BCB_EXCHANGE_URL || 'https://www.bcb.gob.bo/librerias/indicadores/dolar/bolsin.php';
@@ -35,6 +36,7 @@ const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 const app = express();
 let rawDb = null;
 let lastPriceData = null;
+let checkingNotifications = false;
 
 const ALERT_TYPES = {
     price_buy: { label: 'Precio compra', field: 'currentBuy' },
@@ -123,6 +125,18 @@ async function initDb() {
         );
     `);
 
+    await rawDb.runAsync(`
+        CREATE TABLE IF NOT EXISTS page_gap_alert_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            alert_level TEXT NOT NULL,
+            leading_side TEXT,
+            buy_pages INTEGER NOT NULL,
+            sell_pages INTEGER NOT NULL,
+            difference INTEGER NOT NULL,
+            observed_at TEXT NOT NULL
+        );
+    `);
+
     console.log('DB inicializada:', DB_FILE);
 }
 
@@ -137,6 +151,32 @@ function averagePrice(rows) {
     return validRows.reduce((sum, price) => sum + price, 0) / validRows.length;
 }
 
+function isEligiblePageAd(item) {
+    const advertiser = item?.advertiser;
+    const advertisement = item?.adv;
+    return advertiser?.userType === 'merchant'
+        && Number(advertiser?.userGrade) >= 3
+        && Boolean(advertiser?.userIdentity)
+        && advertisement?.classify === 'profession';
+}
+
+function pageCountFromResponse(response, tradeType) {
+    const rows = response.data?.data;
+    if (!Array.isArray(rows) || rows.some((item) => !isEligiblePageAd(item))) {
+        console.error(
+            `Binance devolvio anuncios no verificados o destacados en ${tradeType}; se omite el conteo.`
+        );
+        return null;
+    }
+
+    const rawTotal = response.data?.total;
+    if (rawTotal === null || rawTotal === undefined || rawTotal === '') return null;
+
+    const total = Number(rawTotal);
+    if (!Number.isFinite(total) || total < 0) return null;
+    return Math.ceil(total / Math.max(P2P_PAGE_SIZE, 1));
+}
+
 async function fetchUsdtPriceSafe() {
     try {
         const headers = {
@@ -148,7 +188,7 @@ async function fetchUsdtPriceSafe() {
             asset: 'USDT',
             fiat: 'BOB',
             page: 1,
-            rows: Math.max(AVG_ROWS, 1),
+            rows: Math.max(AVG_ROWS, P2P_PAGE_SIZE, 1),
             payTypes: [],
             publisherType: 'merchant',
             transAmount: '0'
@@ -170,6 +210,8 @@ async function fetchUsdtPriceSafe() {
         const currentSell = parseFloat(sellData[0]?.adv?.price);
         const avgBuy = averagePrice(buyData);
         const avgSell = averagePrice(sellData);
+        const buyPages = pageCountFromResponse(buyResp, 'BUY');
+        const sellPages = pageCountFromResponse(sellResp, 'SELL');
 
         if (![currentBuy, currentSell, avgBuy, avgSell].every(Number.isFinite)) {
             return { error: 'Binance devolvio precios invalidos' };
@@ -179,7 +221,17 @@ async function fetchUsdtPriceSafe() {
         const gapAvg = avgBuy - avgSell;
         const gapAvgPercent = avgBuy === 0 ? 0 : (gapAvg / avgBuy) * 100;
 
-        lastPriceData = { currentBuy, currentSell, avgBuy, avgSell, gapPrice, gapAvg, gapAvgPercent };
+        lastPriceData = {
+            currentBuy,
+            currentSell,
+            avgBuy,
+            avgSell,
+            gapPrice,
+            gapAvg,
+            gapAvgPercent,
+            buyPages,
+            sellPages
+        };
         return lastPriceData;
     } catch (err) {
         console.error('Error fetchUsdtPriceSafe:', err.message);
@@ -258,23 +310,26 @@ function formatBcbMessage(rate) {
         `1 USD = Bs ${rate.value.toFixed(2)}`,
         rate.effectiveDate ? `Vigente desde: ${rate.effectiveDate}` : null,
         '',
-        'Fuente: Banco Central de Bolivia (BCB)',
-        BCB_EXCHANGE_URL
+        'Fuente: Banco Central de Bolivia (BCB)'
     ].filter((line) => line !== null).join('\n');
 }
 
-async function broadcastBcbRate(rate) {
-    const recipients = await rawDb.allAsync(`
+async function getBroadcastRecipients() {
+    return rawDb.allAsync(`
         SELECT DISTINCT COALESCE(chat_id, telegram_id) AS chat_id
         FROM users
         WHERE COALESCE(chat_id, telegram_id) IS NOT NULL
     `);
+}
+
+async function broadcastMessage(message, notificationName) {
+    const recipients = await getBroadcastRecipients();
     let sent = 0;
     let failed = 0;
 
     for (const recipient of recipients) {
         try {
-            await bot.sendMessage(recipient.chat_id, formatBcbMessage(rate), {
+            await bot.sendMessage(recipient.chat_id, message, {
                 disable_web_page_preview: true
             });
             sent += 1;
@@ -286,7 +341,11 @@ async function broadcastBcbRate(rate) {
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    console.log(`Notificacion BCB finalizada. Enviados: ${sent}, fallidos: ${failed}`);
+    console.log(`${notificationName} finalizada. Enviados: ${sent}, fallidos: ${failed}`);
+}
+
+async function broadcastBcbRate(rate) {
+    await broadcastMessage(formatBcbMessage(rate), 'Notificacion BCB');
 }
 
 // =================== HELPERS ===================
@@ -384,6 +443,77 @@ function formatPriceMessage(prices) {
 function notificationSummary(notification) {
     const direction = DIRECTIONS[inferDirection(notification)]?.label || 'sube';
     return `${getAlertLabel(notification.notify_type)} ${direction} a ${Number(notification.limit_value).toFixed(2)}`;
+}
+
+function getPageGapAlertLevel(difference) {
+    if (difference <= 10) return 'normal';
+    if (difference <= 19) return 'alert11';
+    return 'alert20';
+}
+
+function formatPageGapMessage({ alertLevel, leadingSide, buyPages, sellPages, difference }) {
+    const isBuyLeading = leadingSide === 'BUY';
+    const heading = alertLevel === 'alert11'
+        ? 'Alerta 11 - Notificacion informativa'
+        : 'Alerta 20 - Notificacion importante';
+
+    return [
+        heading,
+        '',
+        `${leadingSide} tiene mas paginas.`,
+        isBuyLeading ? 'Es hora de comprar.' : 'Es hora de vender.',
+        `Diferencia: ${difference} paginas.`,
+        `BUY: ${buyPages} paginas | SELL: ${sellPages} paginas`
+    ].join('\n');
+}
+
+async function savePageGapState({ alertLevel, leadingSide, buyPages, sellPages, difference }) {
+    await rawDb.runAsync(
+        `INSERT INTO page_gap_alert_state
+            (id, alert_level, leading_side, buy_pages, sell_pages, difference, observed_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            alert_level = excluded.alert_level,
+            leading_side = excluded.leading_side,
+            buy_pages = excluded.buy_pages,
+            sell_pages = excluded.sell_pages,
+            difference = excluded.difference,
+            observed_at = excluded.observed_at`,
+        [alertLevel, leadingSide, buyPages, sellPages, difference, new Date().toISOString()]
+    );
+}
+
+async function checkPageGapAlert(prices) {
+    const buyPages = prices.buyPages;
+    const sellPages = prices.sellPages;
+    if (!Number.isInteger(buyPages) || !Number.isInteger(sellPages)) {
+        console.error('Binance no devolvio totales validos para calcular la diferencia de paginas.');
+        return;
+    }
+
+    const difference = Math.abs(buyPages - sellPages);
+    const leadingSide = buyPages === sellPages ? null : buyPages > sellPages ? 'BUY' : 'SELL';
+    const alertLevel = getPageGapAlertLevel(difference);
+    const previous = await rawDb.getAsync('SELECT * FROM page_gap_alert_state WHERE id = 1');
+    const shouldNotify = alertLevel !== 'normal'
+        && (
+            !previous
+            || previous.alert_level !== alertLevel
+            || previous.leading_side !== leadingSide
+        );
+
+    if (shouldNotify) {
+        const message = formatPageGapMessage({
+            alertLevel,
+            leadingSide,
+            buyPages,
+            sellPages,
+            difference
+        });
+        await broadcastMessage(message, `Alerta de paginas ${alertLevel}`);
+    }
+
+    await savePageGapState({ alertLevel, leadingSide, buyPages, sellPages, difference });
 }
 
 // =================== MENUS ===================
@@ -568,9 +698,14 @@ bot.on('message', async (msg) => {
 
 // =================== SCHEDULER ===================
 async function checkNotifications() {
+    if (checkingNotifications) return;
+    checkingNotifications = true;
+
     try {
         const prices = await fetchUsdtPriceSafe();
         if (prices.error) return;
+
+        await checkPageGapAlert(prices);
 
         const notifications = await getActiveNotifications();
         for (const notification of notifications) {
@@ -601,6 +736,8 @@ async function checkNotifications() {
         }
     } catch (err) {
         console.error('Scheduler error:', err.message);
+    } finally {
+        checkingNotifications = false;
     }
 }
 
@@ -659,6 +796,8 @@ app.get('/status', async (req, res) => {
             active_notifications: row.c,
             last_price_data: lastPriceData,
             avg_rows: AVG_ROWS,
+            p2p_page_size: P2P_PAGE_SIZE,
+            p2p_page_filter: 'verified_merchants_without_featured_ads',
             check_interval_ms: CHECK_INTERVAL_MS,
             bcb_exchange_rate: bcbState
                 ? {
