@@ -16,6 +16,18 @@ const DB_FILE = process.env.DB_FILE || './botdata.sqlite';
 const BINANCE_API_URL = process.env.BINANCE_API_URL || 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
 const AVG_ROWS = process.env.AVG_ROWS ? parseInt(process.env.AVG_ROWS, 10) : 5;
 const P2P_PAGE_SIZE = process.env.P2P_PAGE_SIZE ? parseInt(process.env.P2P_PAGE_SIZE, 10) : 10;
+const PAGE_GAP_MIN_INTERVAL_MS = process.env.PAGE_GAP_MIN_INTERVAL_MS
+    ? parseInt(process.env.PAGE_GAP_MIN_INTERVAL_MS, 10)
+    : 5 * 60 * 1000;
+const PAGE_GAP_MAX_INTERVAL_MS = process.env.PAGE_GAP_MAX_INTERVAL_MS
+    ? parseInt(process.env.PAGE_GAP_MAX_INTERVAL_MS, 10)
+    : 10 * 60 * 1000;
+const PAGE_GAP_DAILY_LIMIT = process.env.PAGE_GAP_DAILY_LIMIT
+    ? parseInt(process.env.PAGE_GAP_DAILY_LIMIT, 10)
+    : 4;
+const PAGE_GAP_NOTIFICATION_COOLDOWN_MS = process.env.PAGE_GAP_NOTIFICATION_COOLDOWN_MS
+    ? parseInt(process.env.PAGE_GAP_NOTIFICATION_COOLDOWN_MS, 10)
+    : 4 * 60 * 60 * 1000;
 const GAP_DEFAULT_LIMIT = process.env.GAP_DEFAULT_LIMIT ? parseFloat(process.env.GAP_DEFAULT_LIMIT) : 15;
 const CHECK_INTERVAL_MS = process.env.CHECK_INTERVAL_MS ? parseInt(process.env.CHECK_INTERVAL_MS, 10) : 30000;
 const BCB_EXCHANGE_URL = process.env.BCB_EXCHANGE_URL || 'https://www.bcb.gob.bo/librerias/indicadores/dolar/bolsin.php';
@@ -37,6 +49,7 @@ const app = express();
 let rawDb = null;
 let lastPriceData = null;
 let checkingNotifications = false;
+let checkingPageGap = false;
 
 const ALERT_TYPES = {
     price_buy: { label: 'Precio compra', field: 'currentBuy' },
@@ -135,6 +148,22 @@ async function initDb() {
             difference INTEGER NOT NULL,
             observed_at TEXT NOT NULL
         );
+    `);
+
+    await rawDb.runAsync(`
+        CREATE TABLE IF NOT EXISTS page_gap_notification_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day_key TEXT NOT NULL,
+            alert_level TEXT NOT NULL,
+            leading_side TEXT NOT NULL,
+            difference INTEGER NOT NULL,
+            sent_at TEXT NOT NULL
+        );
+    `);
+
+    await rawDb.runAsync(`
+        CREATE INDEX IF NOT EXISTS idx_page_gap_notification_day
+        ON page_gap_notification_log(day_key, sent_at);
     `);
 
     console.log('DB inicializada:', DB_FILE);
@@ -342,6 +371,7 @@ async function broadcastMessage(message, notificationName) {
     }
 
     console.log(`${notificationName} finalizada. Enviados: ${sent}, fallidos: ${failed}`);
+    return { sent, failed };
 }
 
 async function broadcastBcbRate(rate) {
@@ -446,16 +476,16 @@ function notificationSummary(notification) {
 }
 
 function getPageGapAlertLevel(difference) {
-    if (difference <= 10) return 'normal';
-    if (difference <= 19) return 'alert11';
-    return 'alert20';
+    if (difference < 5) return 'normal';
+    if (difference <= 15) return 'alert10';
+    return 'alert15';
 }
 
 function formatPageGapMessage({ alertLevel, leadingSide, buyPages, sellPages, difference }) {
     const isBuyLeading = leadingSide === 'BUY';
-    const heading = alertLevel === 'alert11'
-        ? 'Alerta 11 - Notificacion informativa'
-        : 'Alerta 20 - Notificacion importante';
+    const heading = alertLevel === 'alert10'
+        ? 'Alerta 10 - Notificacion informativa'
+        : 'Alerta: mas de 15 paginas de diferencia - Notificacion importante';
 
     return [
         heading,
@@ -464,6 +494,37 @@ function formatPageGapMessage({ alertLevel, leadingSide, buyPages, sellPages, di
         isBuyLeading ? 'Es hora de comprar.' : 'Es hora de vender.',
         `Diferencia: ${difference} paginas.`,
         `BUY: ${buyPages} paginas | SELL: ${sellPages} paginas`
+    ].join('\n');
+}
+
+function formatManualPageGapMessage(prices) {
+    const { buyPages, sellPages } = prices;
+    if (!Number.isInteger(buyPages) || !Number.isInteger(sellPages)) {
+        return 'No se pudo calcular la diferencia de paginas en este momento.';
+    }
+
+    const difference = Math.abs(buyPages - sellPages);
+    const leadingSide = buyPages === sellPages ? null : buyPages > sellPages ? 'BUY' : 'SELL';
+    const alertLevel = getPageGapAlertLevel(difference);
+    const status = alertLevel === 'normal'
+        ? 'Normal'
+        : alertLevel === 'alert10'
+            ? 'Alerta 10 - Informativa'
+            : 'Alerta: mas de 15 paginas - Importante';
+
+    const result = !leadingSide
+        ? 'BUY y SELL tienen la misma cantidad de paginas.'
+        : `${leadingSide} tiene mas paginas. ${leadingSide === 'BUY' ? 'Es hora de comprar.' : 'Es hora de vender.'}`;
+
+    return [
+        'Diferencia de paginas BUY/SELL',
+        '',
+        `Estado: ${status}`,
+        `BUY: ${buyPages} paginas`,
+        `SELL: ${sellPages} paginas`,
+        `Diferencia: ${difference} paginas`,
+        '',
+        result
     ].join('\n');
 }
 
@@ -483,6 +544,37 @@ async function savePageGapState({ alertLevel, leadingSide, buyPages, sellPages, 
     );
 }
 
+function getBoliviaDayKey(date = new Date()) {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: BOLIVIA_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(date);
+}
+
+async function getPageGapDailyNotificationState(dayKey) {
+    const row = await rawDb.getAsync(
+        `SELECT COUNT(*) AS sent_count, MAX(sent_at) AS last_sent_at
+         FROM page_gap_notification_log
+         WHERE day_key = ?`,
+        [dayKey]
+    );
+    return {
+        sentCount: Number(row?.sent_count) || 0,
+        lastSentAt: row?.last_sent_at || null
+    };
+}
+
+async function recordPageGapNotification({ alertLevel, leadingSide, difference, sentAt }) {
+    await rawDb.runAsync(
+        `INSERT INTO page_gap_notification_log
+            (day_key, alert_level, leading_side, difference, sent_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [getBoliviaDayKey(new Date(sentAt)), alertLevel, leadingSide, difference, sentAt]
+    );
+}
+
 async function checkPageGapAlert(prices) {
     const buyPages = prices.buyPages;
     const sellPages = prices.sellPages;
@@ -495,12 +587,16 @@ async function checkPageGapAlert(prices) {
     const leadingSide = buyPages === sellPages ? null : buyPages > sellPages ? 'BUY' : 'SELL';
     const alertLevel = getPageGapAlertLevel(difference);
     const previous = await rawDb.getAsync('SELECT * FROM page_gap_alert_state WHERE id = 1');
+    const dayKey = getBoliviaDayKey();
+    const dailyState = await getPageGapDailyNotificationState(dayKey);
+    const stateChanged = !previous
+        || previous.alert_level !== alertLevel
+        || previous.leading_side !== leadingSide;
+    const cooldownElapsed = !dailyState.lastSentAt
+        || Date.now() - new Date(dailyState.lastSentAt).getTime() >= PAGE_GAP_NOTIFICATION_COOLDOWN_MS;
     const shouldNotify = alertLevel !== 'normal'
-        && (
-            !previous
-            || previous.alert_level !== alertLevel
-            || previous.leading_side !== leadingSide
-        );
+        && dailyState.sentCount < PAGE_GAP_DAILY_LIMIT
+        && (stateChanged || cooldownElapsed);
 
     if (shouldNotify) {
         const message = formatPageGapMessage({
@@ -510,7 +606,15 @@ async function checkPageGapAlert(prices) {
             sellPages,
             difference
         });
-        await broadcastMessage(message, `Alerta de paginas ${alertLevel}`);
+        const delivery = await broadcastMessage(message, `Alerta de paginas ${alertLevel}`);
+        if (delivery.sent > 0) {
+            await recordPageGapNotification({
+                alertLevel,
+                leadingSide,
+                difference,
+                sentAt: new Date().toISOString()
+            });
+        }
     }
 
     await savePageGapState({ alertLevel, leadingSide, buyPages, sellPages, difference });
@@ -522,6 +626,7 @@ function mainMenu() {
         reply_markup: {
             inline_keyboard: [
                 [{ text: 'Consultar precios', callback_data: 'menu_prices' }],
+                [{ text: '📊 Diferencia paginas BUY/SELL', callback_data: 'menu_page_gap' }],
                 [{ text: 'Activar notificacion', callback_data: 'menu_activate' }],
                 [{ text: 'Mis notificaciones', callback_data: 'menu_mydata' }],
                 [{ text: 'Desactivar todas', callback_data: 'menu_deactivate_all' }]
@@ -582,6 +687,16 @@ bot.on('callback_query', async (query) => {
                 return;
             }
             await bot.sendMessage(chatId, formatPriceMessage(prices));
+            return;
+        }
+
+        if (data === 'menu_page_gap') {
+            const prices = await fetchUsdtPriceSafe();
+            if (prices.error) {
+                await bot.sendMessage(chatId, 'No se pudo consultar la diferencia de paginas en este momento.');
+                return;
+            }
+            await bot.sendMessage(chatId, formatManualPageGapMessage(prices), mainMenu());
             return;
         }
 
@@ -705,8 +820,6 @@ async function checkNotifications() {
         const prices = await fetchUsdtPriceSafe();
         if (prices.error) return;
 
-        await checkPageGapAlert(prices);
-
         const notifications = await getActiveNotifications();
         for (const notification of notifications) {
             const alertType = ALERT_TYPES[notification.notify_type];
@@ -739,6 +852,34 @@ async function checkNotifications() {
     } finally {
         checkingNotifications = false;
     }
+}
+
+async function checkAutomaticPageGap() {
+    if (checkingPageGap) return;
+    checkingPageGap = true;
+
+    try {
+        const prices = await fetchUsdtPriceSafe();
+        if (prices.error) return;
+        await checkPageGapAlert(prices);
+    } catch (err) {
+        console.error('Error revisando diferencia de paginas:', err.message);
+    } finally {
+        checkingPageGap = false;
+    }
+}
+
+function getRandomPageGapInterval() {
+    const minimum = Math.min(PAGE_GAP_MIN_INTERVAL_MS, PAGE_GAP_MAX_INTERVAL_MS);
+    const maximum = Math.max(PAGE_GAP_MIN_INTERVAL_MS, PAGE_GAP_MAX_INTERVAL_MS);
+    return Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
+}
+
+async function runPageGapScheduler() {
+    await checkAutomaticPageGap();
+    const nextCheckInMs = getRandomPageGapInterval();
+    console.log(`Proxima revision de paginas en ${Math.round(nextCheckInMs / 1000)} segundos.`);
+    setTimeout(runPageGapScheduler, nextCheckInMs);
 }
 
 async function checkBcbExchangeRate() {
@@ -798,6 +939,17 @@ app.get('/status', async (req, res) => {
             avg_rows: AVG_ROWS,
             p2p_page_size: P2P_PAGE_SIZE,
             p2p_page_filter: 'verified_merchants_without_featured_ads',
+            page_gap_alert_ranges: {
+                normal: '0-4',
+                informational: '5-15',
+                important: '16+'
+            },
+            page_gap_check_interval_ms: {
+                minimum: PAGE_GAP_MIN_INTERVAL_MS,
+                maximum: PAGE_GAP_MAX_INTERVAL_MS
+            },
+            page_gap_daily_notification_limit: PAGE_GAP_DAILY_LIMIT,
+            page_gap_notification_cooldown_ms: PAGE_GAP_NOTIFICATION_COOLDOWN_MS,
             check_interval_ms: CHECK_INTERVAL_MS,
             bcb_exchange_rate: bcbState
                 ? {
@@ -821,6 +973,7 @@ app.get('/status', async (req, res) => {
     setInterval(checkNotifications, CHECK_INTERVAL_MS);
     setInterval(checkBcbExchangeRate, BCB_CHECK_INTERVAL_MS);
     checkNotifications();
+    runPageGapScheduler();
     checkBcbExchangeRate();
     app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
 })();
