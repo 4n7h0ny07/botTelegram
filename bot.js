@@ -476,7 +476,7 @@ function notificationSummary(notification) {
 }
 
 function getPageGapAlertLevel(difference) {
-    if (difference < 5) return 'normal';
+    if (difference < 8) return 'normal';
     if (difference <= 15) return 'alert10';
     return 'alert15';
 }
@@ -945,8 +945,8 @@ app.get('/status', async (req, res) => {
             p2p_page_size: P2P_PAGE_SIZE,
             p2p_page_filter: 'verified_merchants_without_featured_ads',
             page_gap_alert_ranges: {
-                normal: '0-4',
-                informational: '5-15',
+                normal: '0-7',
+                informational: '8-15',
                 important: '16+'
             },
             page_gap_check_interval_ms: {

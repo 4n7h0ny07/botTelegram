@@ -28,8 +28,8 @@ Bot de Telegram para consultar precios de compra y venta de USDT en Binance P2P 
   anunciantes verificados y excluyendo anuncios destacados.
 - El boton `Diferencia paginas Compra/Venta` permite consultar el desfase manualmente
   sin consumir el limite de avisos automaticos.
-- Una diferencia de 0 a 4 paginas es normal y no genera mensajes automaticos.
-- De 5 a 15 paginas envia una notificacion informativa a todos los usuarios.
+- Una diferencia de 0 a 7 paginas es normal y no genera mensajes automaticos.
+- De 8 a 15 paginas envia una notificacion informativa a todos los usuarios.
 - Desde 16 paginas envia una notificacion importante a todos los usuarios.
 - La alerta indica que lado tiene mas paginas, la diferencia y si es hora de
   comprar o vender.
